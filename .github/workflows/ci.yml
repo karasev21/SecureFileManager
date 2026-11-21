@@ -1,4 +1,4 @@
-﻿name: SecureFileManager CI/CD
+name: SecureFileManager CI/CD
 
 on:
   push:
@@ -43,7 +43,7 @@ jobs:
         run: dotnet publish FileManager.Client/FileManager.Client.csproj -c Release --no-restore -o artifacts/client
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6 (Node.js 24)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v6 (Node.js 24)
         with:
           name: server-and-client-builds
           path: artifacts/
@@ -77,7 +77,7 @@ jobs:
 
       - name: Upload test reports
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6 (Node.js 24)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v6 (Node.js 24)
         with:
           name: test-results-and-coverage
           path: TestResults/
@@ -106,7 +106,7 @@ jobs:
 
       - name: Upload Semgrep report
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6 (Node.js 24)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v6 (Node.js 24)
         with:
           name: semgrep-sast-report
           path: semgrep-report.sarif
@@ -135,7 +135,7 @@ jobs:
 
       - name: Upload Trivy report
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6 (Node.js 24)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v6 (Node.js 24)
         with:
           name: trivy-dependency-report
           path: trivy-report.json
@@ -247,7 +247,7 @@ jobs:
           }
 
       - name: Upload working Windows EXE package
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6 (Node.js 24)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v6 (Node.js 24)
         with:
           name: windows-x64-executables
           path: dist/windows/
