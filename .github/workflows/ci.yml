@@ -1,4 +1,4 @@
-﻿name: SecureFileManager CI/CD
+name: SecureFileManager CI/CD
 
 on:
   push:
@@ -15,7 +15,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6 (Node.js 24)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6 (Node.js 24)
 
       - name: Setup .NET
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5 (Node.js 24)
@@ -56,7 +56,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6 (Node.js 24)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6 (Node.js 24)
 
       - name: Setup .NET
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5 (Node.js 24)
@@ -91,7 +91,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6 (Node.js 24)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6 (Node.js 24)
 
       - name: Setup Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6 (Node.js 24)
@@ -120,7 +120,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6 (Node.js 24)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6 (Node.js 24)
 
       - name: Scan dependencies
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -149,7 +149,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6 (Node.js 24)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6 (Node.js 24)
 
       # Transfer the actual compiled output from the Build job.
       # act stores this artifact in its local artifact server during local runs.
@@ -199,7 +199,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6 (Node.js 24)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6 (Node.js 24)
 
       - name: Setup .NET 8
         uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5 (Node.js 24)
