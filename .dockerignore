@@ -1,0 +1,15 @@
+.git
+.act-artifacts
+.act-cache
+**/bin
+**/obj
+**/TestResults
+**/ManagerData
+.vs
+.vscode
+*.db
+*.db-shm
+*.db-wal
+coverage
+publish
+artifacts

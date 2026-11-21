@@ -1,0 +1,2 @@
+# act bind-mounts the Windows checkout into Linux; Bash scripts require LF.
+*.sh text eol=lf

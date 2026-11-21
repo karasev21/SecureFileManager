@@ -1,0 +1,420 @@
+# Focused Semgrep CE guards. Scope and limitations: docs/practice2-semgrep.md.
+# Official rules are pinned in vendor/. No network rule loading during scans.
+# Trust only the reviewed FileService.ValidateName and private FileService.PathFor.
+# Constant propagation excludes constant strings from dynamic SQL/shell sources.
+rules:
+  -
+    id: "securefilemanager-csharp-insecure-binaryformatter"
+    languages:
+      - "csharp"
+    severity: "ERROR"
+    message: "BinaryFormatter is unsafe for untrusted data. Use System.Text.Json with a fixed DTO and validation."
+    metadata:
+      cwe:
+        - "CWE-502: Deserialization of Untrusted Data"
+      category: "security"
+      confidence: "HIGH"
+    pattern-either:
+      -
+        pattern: "new BinaryFormatter(...)"
+      -
+        pattern: "new System.Runtime.Serialization.Formatters.Binary.BinaryFormatter(...)"
+  -
+    id: "securefilemanager-csharp-xxe-dtd-parsing"
+    languages:
+      - "csharp"
+    severity: "ERROR"
+    message: "DTD parsing is enabled. Use DtdProcessing.Prohibit for uploaded XML."
+    metadata:
+      cwe:
+        - "CWE-611: Improper Restriction of XML External Entity Reference"
+      category: "security"
+      confidence: "HIGH"
+    pattern-either:
+      -
+        pattern: "$SETTINGS.DtdProcessing = DtdProcessing.Parse"
+      -
+        pattern: "DtdProcessing = DtdProcessing.Parse"
+      -
+        pattern: "$SETTINGS.DtdProcessing = System.Xml.DtdProcessing.Parse"
+      -
+        pattern: "DtdProcessing = System.Xml.DtdProcessing.Parse"
+  -
+    id: "securefilemanager-csharp-external-xml-resolver"
+    languages:
+      - "csharp"
+    severity: "ERROR"
+    message: "An external XML resolver is enabled. Set XmlResolver to null for untrusted XML."
+    metadata:
+      cwe:
+        - "CWE-611: Improper Restriction of XML External Entity Reference"
+      category: "security"
+      confidence: "HIGH"
+    pattern-either:
+      -
+        pattern: "$SETTINGS.XmlResolver = new XmlUrlResolver(...)"
+      -
+        pattern: "XmlResolver = new XmlUrlResolver(...)"
+      -
+        pattern: "$SETTINGS.XmlResolver = new System.Xml.XmlUrlResolver(...)"
+      -
+        pattern: "XmlResolver = new System.Xml.XmlUrlResolver(...)"
+  -
+    id: "securefilemanager-csharp-dynamic-sql"
+    languages:
+      - "csharp"
+    severity: "ERROR"
+    message: "A constructed string reaches SQL text. Keep SQL constant and bind values with Parameters.AddWithValue."
+    metadata:
+      cwe:
+        - "CWE-89: SQL Injection"
+      category: "security"
+      confidence: "MEDIUM"
+    mode: "taint"
+    pattern-sources:
+      -
+        patterns:
+          -
+            pattern-either:
+              -
+                pattern: "$LEFT + $RIGHT"
+              -
+                pattern: "$\"...{$VALUE}...\""
+              -
+                pattern: "string.Format(...)"
+          -
+            pattern-not: "\"...\""
+    pattern-sinks:
+      -
+        patterns:
+          -
+            pattern-either:
+              -
+                pattern: "$CMD.CommandText = $SQL"
+              -
+                pattern: "new SqliteCommand($SQL, ...)"
+              -
+                pattern: "new Microsoft.Data.Sqlite.SqliteCommand($SQL, ...)"
+              -
+                pattern: "new SqlCommand($SQL, ...)"
+              -
+                pattern: "new Microsoft.Data.SqlClient.SqlCommand($SQL, ...)"
+              -
+                pattern: "$DB.ExecuteSqlRaw($SQL, ...)"
+              -
+                pattern: "$DB.FromSqlRaw($SQL, ...)"
+          -
+            focus-metavariable: "$SQL"
+  -
+    id: "securefilemanager-csharp-http-path-traversal"
+    languages:
+      - "csharp"
+    severity: "ERROR"
+    message: "HTTP input reaches a filesystem path. Validate a single filename and keep it inside the user's storage directory."
+    metadata:
+      cwe:
+        - "CWE-22: Path Traversal"
+      category: "security"
+      confidence: "HIGH"
+    mode: "taint"
+    pattern-sources:
+      -
+        pattern-either:
+          -
+            pattern: "$HTTP.Request.Query[$KEY]"
+          -
+            pattern: "$HTTP.Request.RouteValues[$KEY]"
+          -
+            pattern: "$HTTP.Request.Form[$KEY]"
+          -
+            pattern: "(HttpRequest $REQUEST).Query[$KEY]"
+          -
+            pattern: "(HttpRequest $REQUEST).RouteValues[$KEY]"
+          -
+            pattern: "(HttpRequest $REQUEST).Form[$KEY]"
+          -
+            pattern: "(IFormFile $UPLOAD).FileName"
+      - patterns:
+          - pattern: "$APP.$MAP($ROUTE, (..., string $NAME, ...) => { ... })"
+          - metavariable-regex:
+              metavariable: "$MAP"
+              regex: "^Map(Get|Post|Put|Patch|Delete)$"
+          - focus-metavariable: "$NAME"
+    pattern-sanitizers:
+      -
+        patterns:
+          -
+            pattern: "FileService.ValidateName($NAME)"
+          -
+            focus-metavariable: "$NAME"
+        by-side-effect: true
+    pattern-sinks:
+      -
+        patterns:
+          -
+            pattern-either:
+              -
+                pattern: "File.ReadAllText($PATH, ...)"
+              -
+                pattern: "File.ReadAllBytes($PATH, ...)"
+              -
+                pattern: "File.ReadAllTextAsync($PATH, ...)"
+              -
+                pattern: "File.ReadAllBytesAsync($PATH, ...)"
+              -
+                pattern: "File.WriteAllText($PATH, ...)"
+              -
+                pattern: "File.WriteAllBytes($PATH, ...)"
+              -
+                pattern: "File.WriteAllTextAsync($PATH, ...)"
+              -
+                pattern: "File.WriteAllBytesAsync($PATH, ...)"
+              -
+                pattern: "File.Delete($PATH)"
+              - pattern: "File.Move($PATH, ...)"
+              - pattern: "File.Move($SOURCE, $PATH, ...)"
+              - pattern: "File.Copy($PATH, ...)"
+              - pattern: "File.Copy($SOURCE, $PATH, ...)"
+              -
+                pattern: "File.OpenRead($PATH)"
+              -
+                pattern: "File.OpenWrite($PATH)"
+              -
+                pattern: "File.Create($PATH, ...)"
+              -
+                pattern: "new FileStream($PATH, ...)"
+          -
+            focus-metavariable: "$PATH"
+  -
+    id: "securefilemanager-csharp-zip-slip"
+    languages:
+      - "csharp"
+    severity: "ERROR"
+    message: "ZIP entry.FullName reaches a file path without validation. Reject traversal before creating the target file."
+    metadata:
+      cwe:
+        - "CWE-22: Path Traversal"
+      category: "security"
+      confidence: "HIGH"
+    mode: "taint"
+    pattern-sources:
+      -
+        pattern: "(ZipArchiveEntry $ENTRY).FullName"
+    pattern-sanitizers:
+      -
+        patterns:
+          -
+            pattern: "FileService.ValidateName($NAME)"
+          -
+            focus-metavariable: "$NAME"
+        by-side-effect: true
+      -
+        patterns:
+          -
+            pattern: "PathFor(...)"
+          -
+            pattern-inside: "class FileService { ... }"
+    pattern-sinks:
+      -
+        patterns:
+          -
+            pattern-either:
+              -
+                pattern: "new FileStream($PATH, ...)"
+              -
+                pattern: "File.Create($PATH, ...)"
+              -
+                pattern: "File.WriteAllBytes($PATH, ...)"
+              -
+                pattern: "File.WriteAllText($PATH, ...)"
+              -
+                pattern: "$ENTRY.ExtractToFile($PATH, ...)"
+          -
+            focus-metavariable: "$PATH"
+  -
+    id: "securefilemanager-csharp-shell-injection"
+    languages:
+      - "csharp"
+    severity: "ERROR"
+    message: "Dynamic input reaches a command interpreter. Use a fixed executable and separate ArgumentList items instead of a shell command."
+    metadata:
+      cwe:
+        - "CWE-78: OS Command Injection"
+      category: "security"
+      confidence: "HIGH"
+    mode: "taint"
+    pattern-sources:
+      -
+        patterns:
+          -
+            pattern-either:
+              -
+                pattern: "$LEFT + $RIGHT"
+              -
+                pattern: "$\"...{$VALUE}...\""
+              -
+                pattern: "string.Format(...)"
+          -
+            pattern-not: "\"...\""
+      -
+        pattern-either:
+          -
+            pattern: "$HTTP.Request.Query[$KEY]"
+          -
+            pattern: "$HTTP.Request.RouteValues[$KEY]"
+          -
+            pattern: "$HTTP.Request.Form[$KEY]"
+          -
+            pattern: "(HttpRequest $REQUEST).Query[$KEY]"
+          -
+            pattern: "(HttpRequest $REQUEST).RouteValues[$KEY]"
+          -
+            pattern: "(HttpRequest $REQUEST).Form[$KEY]"
+          -
+            pattern: "(IFormFile $UPLOAD).FileName"
+    pattern-sinks:
+      -
+        patterns:
+          -
+            pattern-either:
+              - pattern: "Process.Start($SHELL, $ARGS)"
+              - pattern: "new ProcessStartInfo($SHELL, $ARGS)"
+              - pattern: "new ProcessStartInfo { FileName = $SHELL, Arguments = $ARGS, ... }"
+          -
+            metavariable-regex:
+              metavariable: "$SHELL"
+              regex: "(?i)^\"(?:cmd(?:\\.exe)?|(?:/bin/)?(?:ba)?sh|powershell(?:\\.exe)?|pwsh(?:\\.exe)?)\"$"
+          -
+            focus-metavariable: "$ARGS"
+  -
+    id: "securefilemanager-csharp-tls-validation-bypass"
+    languages:
+      - "csharp"
+    severity: "ERROR"
+    message: "TLS certificate validation accepts every certificate. Keep default validation or check SslPolicyErrors.None."
+    metadata:
+      cwe:
+        - "CWE-295: Improper Certificate Validation"
+      category: "security"
+      confidence: "HIGH"
+    pattern-either:
+      -
+        pattern: "$HANDLER.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator"
+      -
+        pattern: "ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator"
+      -
+        pattern: "$HANDLER.ServerCertificateCustomValidationCallback = (...) => true"
+      -
+        pattern: "ServerCertificateCustomValidationCallback = (...) => true"
+      -
+        pattern: "$HANDLER.ServerCertificateCustomValidationCallback = (...) => { return true; }"
+  -
+    id: "securefilemanager-csharp-weak-password-hash"
+    languages:
+      - "csharp"
+    severity: "ERROR"
+    message: "MD5/SHA1 is used to hash a password. Use salted PBKDF2 with SHA256 and an appropriate work factor."
+    metadata:
+      cwe:
+        - "CWE-916: Use of Password Hash With Insufficient Computational Effort"
+      category: "security"
+      confidence: "HIGH"
+    patterns:
+      -
+        pattern-either:
+          -
+            pattern: "MD5.HashData(Encoding.$ENC.GetBytes($PASSWORD))"
+          -
+            pattern: "SHA1.HashData(Encoding.$ENC.GetBytes($PASSWORD))"
+          -
+            pattern: "(MD5 $HASH).ComputeHash(Encoding.$ENC.GetBytes($PASSWORD))"
+          -
+            pattern: "(SHA1 $HASH).ComputeHash(Encoding.$ENC.GetBytes($PASSWORD))"
+      -
+        metavariable-regex:
+          metavariable: "$PASSWORD"
+          regex: "(?i)^(password|passwd|pwd|passphrase)$"
+  -
+    id: "securefilemanager-csharp-low-pbkdf2-work-factor"
+    languages:
+      - "csharp"
+    severity: "ERROR"
+    message: "PBKDF2 uses fewer than the project's minimum 210000 iterations. Raise the work factor after measuring login cost."
+    metadata:
+      cwe:
+        - "CWE-916: Use of Password Hash With Insufficient Computational Effort"
+      category: "security"
+      confidence: "HIGH"
+    patterns:
+      -
+        pattern: "Rfc2898DeriveBytes.Pbkdf2($PASSWORD, $SALT, $ITERATIONS, $ALGORITHM, $LENGTH)"
+      -
+        metavariable-comparison:
+          metavariable: "$ITERATIONS"
+          comparison: "$ITERATIONS < 210000"
+  -
+    id: "securefilemanager-csharp-hardcoded-encryption-key"
+    languages:
+      - "csharp"
+    severity: "ERROR"
+    message: "An encryption key is embedded in source. Load a protected secret or generate it with RandomNumberGenerator."
+    metadata:
+      cwe:
+        - "CWE-321: Use of Hard-coded Cryptographic Key"
+      category: "security"
+      confidence: "HIGH"
+    patterns:
+      -
+        pattern: "(Aes $CIPHER).Key = $KEY"
+      -
+        metavariable-pattern:
+          metavariable: "$KEY"
+          pattern-either:
+            -
+              pattern: "Encoding.$ENC.GetBytes(\"...\")"
+            -
+              pattern: "Convert.FromBase64String(\"...\")"
+            -
+              pattern: "Convert.FromHexString(\"...\")"
+            -
+              pattern: "new byte[] { ... }"
+  -
+    id: "securefilemanager-csharp-secret-in-logs"
+    languages:
+      - "csharp"
+    severity: "ERROR"
+    message: "A password or bearer token is written to a log. Log an event and user ID instead of the secret."
+    metadata:
+      cwe:
+        - "CWE-532: Insertion of Sensitive Information into Log File"
+      category: "security"
+      confidence: "MEDIUM"
+    patterns:
+      -
+        pattern: "$LOGGER.$METHOD(..., $SECRET, ...)"
+      -
+        metavariable-regex:
+          metavariable: "$METHOD"
+          regex: "^Log(Trace|Debug|Information|Warning|Error|Critical)$"
+      -
+        metavariable-regex:
+          metavariable: "$SECRET"
+          regex: "(?i)^(password|passwd|pwd|token|accessToken|refreshToken|secret)$"
+  -
+    id: "securefilemanager-csharp-ecb-mode"
+    languages:
+      - "csharp"
+    severity: "ERROR"
+    message: "ECB encryption exposes repeated blocks. Use authenticated encryption such as AesGcm."
+    metadata:
+      cwe:
+        - "CWE-327: Use of a Broken or Risky Cryptographic Algorithm"
+      category: "security"
+      confidence: "HIGH"
+    pattern-either:
+      -
+        pattern: "(Aes $CIPHER).Mode = CipherMode.ECB"
+      -
+        pattern: "(Aes $CIPHER).EncryptEcb(...)"
+      -
+        pattern: "(Aes $CIPHER).DecryptEcb(...)"

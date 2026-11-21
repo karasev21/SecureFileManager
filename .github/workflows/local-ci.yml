@@ -1,0 +1,139 @@
+name: SecureFileManager Local CI (act)
+
+# Local Windows + Docker Desktop pipeline. Run with act --bind so artifacts and
+# NuGet packages persist in the repo's ignored directories across isolated jobs.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NUGET_PACKAGES: ${{ github.workspace }}/.act-cache/nuget
+
+jobs:
+  build:
+    name: Local Build (Docker SDK)
+    runs-on: ubuntu-latest
+    container:
+      image: securefilemanager/act-dotnet:local
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6 (Node.js 24)
+      - name: Restore locked dependencies (persistent local NuGet cache)
+        run: dotnet restore SecureFileManager.sln --locked-mode
+      - name: Build solution
+        run: dotnet build SecureFileManager.sln -c Release --no-restore
+      - name: Verify .NET analyzers
+        run: dotnet format analyzers SecureFileManager.sln --verify-no-changes --severity warn --no-restore
+      - name: Publish server and client as local build artifacts
+        run: |
+          mkdir -p .act-artifacts/build/server .act-artifacts/build/client
+          dotnet publish FileManager.Server/FileManager.Server.csproj -c Release --no-restore -o .act-artifacts/build/server
+          dotnet publish FileManager.Client/FileManager.Client.csproj -c Release --no-restore -o .act-artifacts/build/client
+          test -s .act-artifacts/build/server/FileManager.Server.dll
+          test -s .act-artifacts/build/client/FileManager.Client.dll
+
+  test:
+    name: Local Test (Docker SDK)
+    needs: build
+    runs-on: ubuntu-latest
+    container:
+      image: securefilemanager/act-dotnet:local
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6 (Node.js 24)
+      - name: Restore locked dependencies (persistent local NuGet cache)
+        run: dotnet restore SecureFileManager.sln --locked-mode
+      - name: Run xUnit tests and save TRX/Cobertura reports
+        run: |
+          mkdir -p .act-artifacts/tests
+          dotnet test FileManager.Tests/FileManager.Tests.csproj \
+            -c Release --no-restore \
+            --logger "trx;LogFileName=test-results.trx" \
+            --results-directory .act-artifacts/tests \
+            --collect:"XPlat Code Coverage"
+
+  sast:
+    name: Local SAST (Semgrep Docker)
+    needs: build
+    runs-on: ubuntu-latest
+    container:
+      image: securefilemanager/act-semgrep:local
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6 (Node.js 24)
+      - name: Install Semgrep
+        run: python -m pip install --no-cache-dir -r .semgrep/requirements.txt
+      - name: Validate rules, test examples, and fail on ERROR findings; save SARIF
+        run: bash .github/scripts/run-sast.sh .act-artifacts/security/semgrep.sarif
+
+  dependency_scan:
+    name: Local Dependency Scan (Trivy)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6 (Node.js 24)
+      - name: Prepare local security report directory
+        run: mkdir -p .act-artifacts/security
+      - name: Install official Trivy CLI (without GitHub token)
+        run: |
+          set -eu
+          VERSION=0.70.0
+          ARCHIVE="trivy_${VERSION}_Linux-64bit.tar.gz"
+          BASE="https://github.com/aquasecurity/trivy/releases/download/v${VERSION}"
+          mkdir -p .act-cache/trivy-cli
+          if [ ! -x .act-cache/trivy-cli/trivy ]; then
+            curl --fail --location --retry 3 --silent --show-error "${BASE}/${ARCHIVE}" -o "/tmp/${ARCHIVE}"
+            curl --fail --location --retry 3 --silent --show-error "${BASE}/trivy_${VERSION}_checksums.txt" -o /tmp/trivy_checksums.txt
+            grep "  ${ARCHIVE}$" /tmp/trivy_checksums.txt > /tmp/trivy_selected_checksum.txt
+            (cd /tmp && sha256sum -c trivy_selected_checksum.txt)
+            tar -xzf "/tmp/${ARCHIVE}" -C .act-cache/trivy-cli trivy
+            chmod +x .act-cache/trivy-cli/trivy
+          fi
+          .act-cache/trivy-cli/trivy --version
+      - name: Scan dependencies (High and Critical)
+        run: |
+          mkdir -p .act-artifacts/security .act-cache/trivy-db
+          .act-cache/trivy-cli/trivy fs \
+            --scanners vuln \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            --format json \
+            --output .act-artifacts/security/trivy.json \
+            --cache-dir .act-cache/trivy-db \
+            --skip-dirs .act-cache --skip-dirs .act-artifacts \
+            .
+
+  deploy:
+    name: Local Deploy (Docker smoke test)
+    needs: [build, test, sast, dependency_scan]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6 (Node.js 24)
+      - name: Verify binaries transferred from Build through shared artifact directory
+        run: |
+          test -s .act-artifacts/build/server/FileManager.Server.dll
+          test -s .act-artifacts/build/client/FileManager.Client.dll
+          find .act-artifacts/tests -name '*.trx' -type f | grep -q .
+      - name: Build local application image
+        run: docker build -t securefilemanager:local .
+      - name: Start application
+        run: docker run -d --name securefilemanager-act -p 127.0.0.1:18080:8080 securefilemanager:local
+      - name: Check application health via Docker network
+        run: |
+          for attempt in $(seq 1 30); do
+            if docker run --rm --network container:securefilemanager-act \
+                curlimages/curl:8.11.1 --fail --silent http://127.0.0.1:8080/api/health; then
+              echo "Local Docker HTTP smoke test passed"
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs securefilemanager-act
+          exit 1
+      - name: Remove test container
+        if: always()
+        run: docker rm -f securefilemanager-act || true

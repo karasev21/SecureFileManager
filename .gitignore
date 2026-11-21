@@ -1,0 +1,30 @@
+**/bin/
+**/obj/
+**/TestResults/
+**/ManagerData/
+.vs/
+.vscode/
+*.db
+*.db-shm
+*.db-wal
+*.user
+*.suo
+coverage/
+publish/
+
+
+# Security scan reports
+semgrep-report.sarif
+trivy-report.json
+
+# Test results
+TestResults/
+**/TestResults/
+
+# Local act execution artifacts
+.act-artifacts/
+local-semgrep.sarif
+local-trivy.json
+
+# Local act NuGet cache (not committed)
+.act-cache/

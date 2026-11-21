@@ -1,0 +1,255 @@
+﻿name: SecureFileManager CI/CD
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6 (Node.js 24)
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5 (Node.js 24)
+        with:
+          dotnet-version: '8.0'
+          cache: true
+          cache-dependency-path: |
+            FileManager.Server/packages.lock.json
+            FileManager.Client/packages.lock.json
+            FileManager.Tests/packages.lock.json
+
+      - name: Restore dependencies
+        run: dotnet restore SecureFileManager.sln --locked-mode
+
+      - name: Build solution
+        run: dotnet build SecureFileManager.sln -c Release --no-restore
+
+      - name: Check .NET analyzers
+        run: dotnet format analyzers SecureFileManager.sln --verify-no-changes --severity warn --no-restore
+
+      - name: Publish server
+        run: dotnet publish FileManager.Server/FileManager.Server.csproj -c Release --no-restore -o artifacts/server
+
+      - name: Publish client
+        run: dotnet publish FileManager.Client/FileManager.Client.csproj -c Release --no-restore -o artifacts/client
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6 (Node.js 24)
+        with:
+          name: server-and-client-builds
+          path: artifacts/
+          retention-days: 7
+
+  test:
+    name: Test
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6 (Node.js 24)
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5 (Node.js 24)
+        with:
+          dotnet-version: '8.0'
+
+      - name: Restore dependencies
+        run: dotnet restore SecureFileManager.sln --locked-mode
+
+      - name: Run tests with coverage
+        run: |
+          dotnet test FileManager.Tests/FileManager.Tests.csproj \
+            -c Release \
+            --no-restore \
+            --logger "trx;LogFileName=test-results.trx" \
+            --results-directory ./TestResults \
+            --collect:"XPlat Code Coverage"
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6 (Node.js 24)
+        with:
+          name: test-results-and-coverage
+          path: TestResults/
+          if-no-files-found: warn
+          retention-days: 7
+
+  sast:
+    name: SAST - Semgrep
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6 (Node.js 24)
+
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6 (Node.js 24)
+        with:
+          python-version: '3.12'
+
+      - name: Install Semgrep
+        run: python -m pip install -r .semgrep/requirements.txt
+
+      - name: Validate rules, test examples, and fail on ERROR findings; save SARIF
+        run: bash .github/scripts/run-sast.sh semgrep-report.sarif
+
+      - name: Upload Semgrep report
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6 (Node.js 24)
+        with:
+          name: semgrep-sast-report
+          path: semgrep-report.sarif
+          if-no-files-found: warn
+          retention-days: 7
+
+  dependency-scan:
+    name: Dependency Security - Trivy
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6 (Node.js 24)
+
+      - name: Scan dependencies
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: json
+          output: trivy-report.json
+          exit-code: '1'
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+
+      - name: Upload Trivy report
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6 (Node.js 24)
+        with:
+          name: trivy-dependency-report
+          path: trivy-report.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  deploy:
+    name: Docker Deploy Smoke Test
+    needs: [build, test, sast, dependency-scan]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6 (Node.js 24)
+
+      # Transfer the actual compiled output from the Build job.
+      # act stores this artifact in its local artifact server during local runs.
+      - name: Download build artifact from Build stage
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6 (Node.js 24)
+        with:
+          name: server-and-client-builds
+          path: incoming-builds
+
+      - name: Verify transferred server and client binaries
+        run: |
+          test -s incoming-builds/server/FileManager.Server.dll
+          test -s incoming-builds/client/FileManager.Client.dll
+          echo "Build artifact successfully transferred to deployment stage."
+
+      - name: Build Docker image
+        run: docker build -t securefilemanager:ci .
+
+      - name: Run Docker container
+        run: |
+          docker run -d \
+            --name securefilemanager-ci \
+            -p 8080:8080 \
+            securefilemanager:ci
+
+      - name: Check application health
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://localhost:8080/api/health; then
+              echo "Application is available"
+              exit 0
+            fi
+            sleep 2
+          done
+
+          docker logs securefilemanager-ci
+          exit 1
+
+      - name: Stop Docker container
+        if: always()
+        run: docker rm -f securefilemanager-ci || true
+
+  windows-exe:
+    name: Windows EXE - publish and smoke test
+    needs: [build, test, sast, dependency-scan]
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6 (Node.js 24)
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5 (Node.js 24)
+        with:
+          dotnet-version: '8.0'
+
+      - name: Publish server as Windows x64 EXE
+        run: dotnet publish FileManager.Server/FileManager.Server.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o dist/windows/server
+
+      - name: Publish client as Windows x64 EXE
+        run: dotnet publish FileManager.Client/FileManager.Client.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o dist/windows/client
+
+      - name: Add launch scripts
+        shell: pwsh
+        run: |
+          Copy-Item .github/scripts/start-server.cmd dist/windows/start-server.cmd
+          Copy-Item .github/scripts/start-client.cmd dist/windows/start-client.cmd
+          Copy-Item docs/practice2-windows-demo.md dist/windows/README-Windows.md
+
+      - name: Test both EXE files on Windows
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $serverExe = (Resolve-Path dist/windows/server/FileManager.Server.exe).Path
+          $clientExe = (Resolve-Path dist/windows/client/FileManager.Client.exe).Path
+          $server = Start-Process -FilePath $serverExe -ArgumentList '--urls', 'http://127.0.0.1:5050' -PassThru
+          try {
+            $ready = $false
+            for ($attempt = 0; $attempt -lt 30; $attempt++) {
+              Start-Sleep -Seconds 1
+              try {
+                $health = Invoke-RestMethod -Uri 'http://127.0.0.1:5050/api/health' -TimeoutSec 2
+                if ($health.status -eq 'ok') { $ready = $true; break }
+              } catch { }
+            }
+            if (-not $ready) { throw 'Windows server EXE failed health check on port 5050.' }
+            '0' | & $clientExe
+            if ($LASTEXITCODE -ne 0) { throw "Windows client EXE exited with code $LASTEXITCODE." }
+            Write-Host 'Both Windows EXE smoke tests passed.'
+          }
+          finally {
+            if ($null -ne $server -and -not $server.HasExited) {
+              Stop-Process -Id $server.Id -Force
+            }
+          }
+
+      - name: Upload working Windows EXE package
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6 (Node.js 24)
+        with:
+          name: windows-x64-executables
+          path: dist/windows/
+          if-no-files-found: error
+          retention-days: 7
