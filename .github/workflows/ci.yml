@@ -1,4 +1,4 @@
-﻿name: SecureFileManager CI/CD
+name: SecureFileManager CI/CD
 
 on:
   push:
@@ -154,7 +154,7 @@ jobs:
       # Transfer the actual compiled output from the Build job.
       # act stores this artifact in its local artifact server during local runs.
       - name: Download build artifact from Build stage
-        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6 (Node.js 24)
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v6 (Node.js 24)
         with:
           name: server-and-client-builds
           path: incoming-builds
